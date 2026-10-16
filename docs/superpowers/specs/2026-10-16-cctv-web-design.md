@@ -17,6 +17,15 @@ When an `.mp4` is selected, play it.
 - Stack = FastAPI embedded, Option 1 (same container/pod, :8080).
 - Auth = shared token (`CCTV_TOKEN`, `?token=` or `X-CCTV-Token` header).
 - Layout = top player + flat list below (simplest, mobile-friendly).
+- URL state = query params + `history.replaceState` (Option A): `?file=<mp4 name>&t=<seconds>`; live updates, no history spam.
+
+## URL deep-linking (playback state)
+Player state lives in the URL so a copied link restores the exact spot:
+
+- **Format:** `?file=archive_YYYY-MM-DD-HH.mp4&t=<seconds>` → play that mp4 at position `t` (`t` omitted = 0). Empty/no params = LIVE. Server side unchanged — this is purely frontend.
+- **Update behavior:** `timeupdate` listener writes `t` via `history.replaceState`, throttled to one write per 3s. Also writes immediately on `seeked` and `pause`. Selecting a row updates `file` immediately (`replaceState`, not push — one history entry per session). Clicking 🔴 LIVE clears params (clean URL, no params = live).
+- **Restore on load:** parse params → if `file` present, set the date input from the filename prefix (so the list shows the row), fetch `/api/files`, highlight the matching row, play it, and on `loadedmetadata` set `v.currentTime = t`. Live mode ignores `t`.
+- **Edge cases:** unknown `file` (deleted by retention, typo) → fetch returns no row → fall back to LIVE and clear the URL. Non-numeric/negative `t` → clamp to 0; `t` beyond duration clamps naturally via `currentTime`. LIVE hour-rollover polling unchanged (live has no URL state).
 
 ## Architecture
 Same container, two threads. Recorder loop untouched. FastAPI + uvicorn on `:8080` in daemon thread started from `app.py`.
@@ -37,6 +46,7 @@ k8s adds `CCTV_TOKEN` secret env + `containerPort: 8080` (+ Service). No PVC cha
 3. Click 🔴 LIVE → destroy mp4 src, re-init hls.js with fresh `/api/live`.
 4. Poll `/api/live` every 60s while in LIVE mode; on hour change reload playlist. While in MP4 mode, show "LIVE moved to HH" badge without interrupting.
 5. List refresh every 60s + on date filter change.
+6. Player ↔ URL sync per "URL deep-linking" above: selecting a video or seeking updates `?file=...&t=...`; loading with those params restores the same spot.
 
 ## Error handling
 - No playlist yet → 404 + frontend "waiting for live…" retry 5s.
@@ -46,6 +56,7 @@ k8s adds `CCTV_TOKEN` secret env + `containerPort: 8080` (+ Service). No PVC cha
 
 ## Testing
 Extend `test_app.py`: files sorting newest-first + date filter, `/api/live` hour format `YYYY-MM-DD-HH`, auth 401/200 via header + query, HLS mime types, traversal rejection (`../`), mp4 404.
+URL deep-linking is frontend-only (no server change): manual checks — copy URL mid-playback, open in fresh tab, playback lands at the same file/position; bad `file` param → LIVE fallback; LIVE click → clean URL.
 
 ## Out of scope (v1)
 Thumbnails, multi-camera, user accounts, low-latency (<5s) WebRTC, RWX split deployment, download zip.
