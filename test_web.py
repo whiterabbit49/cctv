@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -78,3 +79,31 @@ class TestWebFiles(unittest.TestCase):
             r = c.get('/api/files')
             self.assertEqual(r.status_code, 200)
             self.assertEqual(r.json(), [])
+
+class TestWebStatic(unittest.TestCase):
+    def test_hls_rejects_traversal(self):
+        with patch.object(web, 'get_token', return_value=''):
+            c = TestClient(web.app)
+            r = c.get('/hls/../app.py')
+            self.assertIn(r.status_code, (400, 404))
+
+    def test_video_404_for_missing(self):
+        with patch.object(web, 'get_token', return_value=''), \
+             patch('os.path.exists', return_value=False):
+            c = TestClient(web.app)
+            r = c.get('/video/archive_2026-10-16-14.mp4')
+            self.assertEqual(r.status_code, 404)
+
+    def test_hls_serves_playlist_with_correct_mime(self):
+        p = '/tmp/playlist_2026-10-16-14.m3u8'
+        with open(p, 'w') as f:
+            f.write('#EXTM3U\n')
+        try:
+            with patch.object(web, 'get_token', return_value=''), \
+                 patch.object(web, 'get_archive_path', return_value='/tmp'):
+                c = TestClient(web.app)
+                r = c.get('/hls/playlist_2026-10-16-14.m3u8')
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(r.headers['content-type'].split(';')[0], 'application/vnd.apple.mpegurl')
+        finally:
+            os.remove(p)
