@@ -47,3 +47,33 @@ class TestWebLive(unittest.TestCase):
             client = TestClient(web.app)
             r = client.get('/api/live')
             self.assertEqual(r.status_code, 200)
+
+from unittest.mock import patch as _patch
+import os as _os
+
+class TestWebFiles(unittest.TestCase):
+    def test_files_sorted_newest_first(self):
+        import web as _web
+        from fastapi.testclient import TestClient as _TC
+        fake = ['archive_2026-10-16-12.mp4', 'archive_2026-10-16-14.mp4', 'archive_2026-10-15-10.mp4', 'playlist_2026-10-16-14.m3u8', 'other.txt']
+        with _patch('os.listdir', return_value=fake), \
+             _patch('os.path.getsize', return_value=100), \
+             _patch('os.path.getmtime', return_value=1700000000.0), \
+             _patch.object(_web, 'get_token', return_value=''):
+            c = _TC(_web.app)
+            r = c.get('/api/files')
+            self.assertEqual(r.status_code, 200)
+            names = [f['name'] for f in r.json()]
+            self.assertEqual(names, ['archive_2026-10-16-14.mp4', 'archive_2026-10-16-12.mp4', 'archive_2026-10-15-10.mp4'])
+
+    def test_files_date_filter(self):
+        import web as _web
+        from fastapi.testclient import TestClient as _TC
+        fake = ['archive_2026-10-16-14.mp4', 'archive_2026-10-15-10.mp4']
+        with _patch('os.listdir', return_value=fake), \
+             _patch('os.path.getsize', return_value=100), \
+             _patch('os.path.getmtime', return_value=1700000000.0), \
+             _patch.object(_web, 'get_token', return_value=''):
+            c = _TC(_web.app)
+            r = c.get('/api/files?date=2026-10-15')
+            self.assertEqual([f['name'] for f in r.json()], ['archive_2026-10-15-10.mp4'])
