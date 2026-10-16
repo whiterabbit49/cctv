@@ -117,3 +117,13 @@ class TestWebStatic(unittest.TestCase):
                 self.assertEqual(r.headers['content-type'].split(';')[0], 'application/vnd.apple.mpegurl')
         finally:
             os.remove(p)
+
+class TestWebIndex(unittest.TestCase):
+    def test_index_serves_html(self):
+        with patch.object(web, 'get_token', return_value=''):
+            c = TestClient(web.app)
+            r = c.get('/')
+            self.assertEqual(r.status_code, 200)
+            self.assertIn('<video', r.text)
+            self.assertIn('setUrl', r.text)
+            self.assertIn('boot()', r.text)
