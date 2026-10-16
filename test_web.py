@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -87,6 +88,14 @@ class TestWebStatic(unittest.TestCase):
             r = c.get('/hls/../app.py')
             self.assertIn(r.status_code, (400, 404))
 
+    def test_hls_rejects_non_playlist_ts_names(self):
+        with patch.object(web, 'get_token', return_value=''), \
+             patch('os.path.exists', return_value=True), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'):
+            c = TestClient(web.app)
+            r = c.get('/hls/foo.ts')
+            self.assertEqual(r.status_code, 404)
+
     def test_video_404_for_missing(self):
         with patch.object(web, 'get_token', return_value=''), \
              patch('os.path.exists', return_value=False):
@@ -95,14 +104,15 @@ class TestWebStatic(unittest.TestCase):
             self.assertEqual(r.status_code, 404)
 
     def test_hls_serves_playlist_with_correct_mime(self):
-        p = '/tmp/playlist_2026-10-16-14.m3u8'
-        with open(p, 'w') as f:
-            f.write('#EXTM3U\n')
+        fd, p = tempfile.mkstemp(prefix='playlist_', suffix='.m3u8')
+        os.close(fd)
         try:
+            with open(p, 'w') as f:
+                f.write('#EXTM3U\n')
             with patch.object(web, 'get_token', return_value=''), \
-                 patch.object(web, 'get_archive_path', return_value='/tmp'):
+                 patch.object(web, 'get_archive_path', return_value=os.path.dirname(p)):
                 c = TestClient(web.app)
-                r = c.get('/hls/playlist_2026-10-16-14.m3u8')
+                r = c.get('/hls/' + os.path.basename(p))
                 self.assertEqual(r.status_code, 200)
                 self.assertEqual(r.headers['content-type'].split(';')[0], 'application/vnd.apple.mpegurl')
         finally:
