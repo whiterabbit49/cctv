@@ -1,4 +1,3 @@
-import os
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -30,3 +29,21 @@ class TestWebLive(unittest.TestCase):
             client = TestClient(web.app)
             r = client.get('/api/live', headers={'X-CCTV-Token': 'wrong'})
             self.assertEqual(r.status_code, 401)
+
+    def test_auth_accepts_valid_token(self):
+        with patch.object(web, 'get_token', return_value='secret123'), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
+             patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
+             patch('os.path.exists', return_value=True):
+            client = TestClient(web.app)
+            r = client.get('/api/live', headers={'X-CCTV-Token': 'secret123'})
+            self.assertEqual(r.status_code, 200)
+
+    def test_open_when_token_unset(self):
+        with patch.object(web, 'get_token', return_value=''), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
+             patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
+             patch('os.path.exists', return_value=True):
+            client = TestClient(web.app)
+            r = client.get('/api/live')
+            self.assertEqual(r.status_code, 200)
