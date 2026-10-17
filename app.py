@@ -14,6 +14,16 @@ SEGMENT_TIME_SECONDS = 10
 CONSOLIDATION_CHECK_INTERVAL_SECONDS = 60  # Check every minute for hourly rollover
 CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
 BYTES_PER_MB = 1024 * 1024  # For file size conversions
+WEB_PORT = int(os.environ.get('WEB_PORT', '8080'))
+
+
+def start_web_server():
+    try:
+        import uvicorn
+        import web as viewer
+        uvicorn.run(viewer.app, host='0.0.0.0', port=WEB_PORT, log_level='info')
+    except Exception as e:
+        print(f'Web UI failed to start: {e}')
 
 ffmpeg_process = None
 current_process_hour_identifier = None  # YYYY-MM-DD-HH
@@ -358,6 +368,10 @@ def main():
 
     signal.signal(signal.SIGINT, handle_shutdown_signal)
     signal.signal(signal.SIGTERM, handle_shutdown_signal)
+
+    import threading
+    threading.Thread(target=start_web_server, daemon=True).start()
+    print(f'Web viewer on :{WEB_PORT}')
 
     print("CCTV Archiver starting up with hourly MP4 consolidation.")
 
