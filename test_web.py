@@ -144,3 +144,9 @@ class TestWebIndex(unittest.TestCase):
             self.assertIn('<video', r.text)
             self.assertIn('setUrl', r.text)
             self.assertIn('boot()', r.text)
+
+    def test_index_open_with_token_set(self):
+        with patch.object(web, 'get_token', return_value='secret123'):
+            c = TestClient(web.app)
+            r = c.get('/')
+            self.assertEqual(r.status_code, 200)

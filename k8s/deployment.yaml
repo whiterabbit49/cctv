@@ -26,6 +26,12 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 5
+  # Recreate (not RollingUpdate): the archive PVC is ReadWriteOnce, so a new
+  # pod on another node can never start while the old pod still holds the
+  # volume. RollingUpdate deadlocks (new ContainerCreating forever, old never
+  # terminates). Recreate stops the old pod first (brief recording gap).
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cctv-archiver
@@ -39,7 +45,10 @@ spec:
       terminationGracePeriodSeconds: 45
       containers:
         - name: archiver
-          # IMPORTANT: Replace this with the actual path to your built image
+          # IMPORTANT: Replace this with the actual path to your built image.
+          # Prefer unique per-release tags (e.g. :<git-short-sha>): Kubernetes
+          # will NOT restart a pod when an existing tag is re-pushed with new
+          # content, so deploying by a mutable tag silently keeps the old code.
           image: zot.whiterabbit.co.kr/app/cctv:latest
           imagePullPolicy: Always
           # --- Environment Variables ---
@@ -56,17 +65,27 @@ spec:
             # Optional: Set the retention period for video files
             - name: RETENTION_DAYS
               value: "90"
-            # Optional: shared token for the web viewer (empty = open)
             - name: CCTV_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: cctv-rtsp-secret
                   key: CCTV_TOKEN
                   optional: true
-          # --- Web viewer port ---
           ports:
             - containerPort: 8080
               name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
           # --- Volume Mounting ---
           volumeMounts:
             - name: archive-storage

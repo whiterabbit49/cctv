@@ -16,10 +16,16 @@ app = FastAPI(title='cctv-viewer')
 async def token_guard(request: Request, call_next):
     if request.url.path in ('/docs', '/openapi.json', '/redoc'):
         return await call_next(request)
+    # `/` (UI shell) is public so the token prompt loads;
+    # `/api/*`, `/hls/*`, `/video/*` still require token.
+    if request.method == 'GET' and request.url.path == '/':
+        return await call_next(request)
     expected = get_token()
     if not expected:
         return await call_next(request)
-    got = request.query_params.get('token') or request.headers.get('x-cctv-token') or request.cookies.get('cctv_token')
+    got = (request.query_params.get('token')
+           or request.headers.get('x-cctv-token')
+           or request.cookies.get('cctv_token'))
     if got is None or not secrets.compare_digest(got.encode(), expected.encode()):
         return JSONResponse({'detail': 'unauthorized'}, status_code=401)
     return await call_next(request)
@@ -80,4 +86,7 @@ def serve_video(name: str):
 
 @app.get('/')
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, 'index.html'), media_type='text/html')
+    p = os.path.join(STATIC_DIR, 'index.html')
+    if not os.path.exists(p):
+        return JSONResponse({'detail': 'not found'}, status_code=404)
+    return FileResponse(p, media_type='text/html')

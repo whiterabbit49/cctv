@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CCTV Viewer</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-<style>body{font-family:system-ui;margin:0;background:#111;color:#eee}main{max-width:960px;margin:0 auto;padding:12px}video{width:100%;background:#000;border-radius:8px}#list{margin-top:12px;display:flex;flex-direction:column;gap:6px}.row{background:#222;border:0;color:#eee;text-align:left;padding:10px;border-radius:6px;cursor:pointer}.row.live{border:1px solid #e33}.row.active{background:#333}input{padding:8px;border-radius:6px;border:0}#bar{display:flex;gap:8px;margin:12px 0}</style>
+<style>body{font-family:system-ui;margin:0;background:#111;color:#eee}main{max-width:960px;margin:0 auto;padding:12px;height:100vh;height:100dvh;box-sizing:border-box;display:flex;flex-direction:column}video{width:100%;background:#000;border-radius:8px;flex-shrink:0}#list{margin-top:12px;display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;min-height:0}.row{background:#222;border:0;color:#eee;text-align:left;padding:10px;border-radius:6px;cursor:pointer}.row.live{border:1px solid #e33}.row.active{background:#333}input{padding:8px;border-radius:6px;border:0}#bar{display:flex;gap:8px;margin:12px 0}</style>
 </head>
 <body><main>
 <h2>CCTV <span id="state">LIVE</span></h2>
@@ -15,7 +15,7 @@ const v=document.getElementById('v'),list=document.getElementById('list'),d=docu
 tok.value=localStorage.getItem('cctv')||'';
 function setTok(){localStorage.setItem('cctv',tok.value);if(tok.value)document.cookie='cctv_token='+encodeURIComponent(tok.value)+';path=/;samesite=strict';else document.cookie='cctv_token=;path=/;max-age=0';}
 setTok();
-const T=()=>tok.value?('?token='+encodeURIComponent(tok.value)):'';
+const T=(hasQ)=>tok.value?((hasQ?'&token=':'?token=')+encodeURIComponent(tok.value)):'';
 let hls=null,mode='live',liveHour=null;
 
 // URL state: ?file=archive_YYYY-MM-DD-HH.mp4&t=<seconds>; no params = live.
@@ -65,7 +65,7 @@ function playMp4(n,t){
 function mark(){[...list.children].forEach(b=>b.classList.toggle('active',(b.dataset.n||'live')===mode));}
 function load(){
   const q=d.value?('?date='+d.value):'';
-  return fetch('/api/files'+q+T()).then(r=>{
+  return fetch('/api/files'+q+T(!!q)).then(r=>{
     if(r.status===401){document.getElementById('state').textContent='need token';return[];}
     return r.json();
   }).then(fs=>{
