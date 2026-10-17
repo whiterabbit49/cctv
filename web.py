@@ -20,7 +20,7 @@ async def token_guard(request: Request, call_next):
     if not expected:
         return await call_next(request)
     got = request.query_params.get('token') or request.headers.get('x-cctv-token') or request.cookies.get('cctv_token')
-    if got is None or not secrets.compare_digest(got, expected):
+    if got is None or not secrets.compare_digest(got.encode(), expected.encode()):
         return JSONResponse({'detail': 'unauthorized'}, status_code=401)
     return await call_next(request)
 
