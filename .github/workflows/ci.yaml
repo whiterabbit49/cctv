@@ -22,12 +22,8 @@ jobs:
         with:
           python-version: '3.x' # Use a general Python 3 version
 
-      - name: Install dependencies (if any)
-        run: |
-          # Currently, app.py only uses built-in modules
-          # If you add external dependencies (e.g., requests), uncomment and add them here
-          # python -m pip install --upgrade pip
-          # pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install fastapi uvicorn httpx
 
       - name: Run unit tests
-        run: python -m unittest test_app.py
+        run: python -m unittest test_web test_app

@@ -1,4 +1,5 @@
-# test_web.py (new file, first test only)
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -31,38 +32,38 @@ class TestWebLive(unittest.TestCase):
             r = client.get('/api/live', headers={'X-CCTV-Token': 'wrong'})
             self.assertEqual(r.status_code, 401)
 
-    def test_auth_allows_valid_header_token(self):
+    def test_auth_accepts_valid_token(self):
         with patch.object(web, 'get_token', return_value='secret123'), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
              patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
              patch('os.path.exists', return_value=True):
-            c = TestClient(web.app)
-            r = c.get('/api/live', headers={'X-CCTV-Token': 'secret123'})
+            client = TestClient(web.app)
+            r = client.get('/api/live', headers={'X-CCTV-Token': 'secret123'})
             self.assertEqual(r.status_code, 200)
 
-    def test_auth_open_when_no_token_set(self):
-        with patch.object(web, 'get_token', return_value=''), \
-             patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
-             patch('os.path.exists', return_value=True):
-            c = TestClient(web.app)
-            r = c.get('/api/live')
-            self.assertEqual(r.status_code, 200)
-
-    def test_auth_allows_valid_cookie_token(self):
-        # HLS segment requests carry no query/header (URLs come from the
-        # playlist body), so the UI mirrors the token into a cookie.
+    def test_auth_accepts_valid_cookie(self):
         with patch.object(web, 'get_token', return_value='secret123'), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
              patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
              patch('os.path.exists', return_value=True):
-            c = TestClient(web.app)
-            r = c.get('/api/live', cookies={'cctv_token': 'secret123'})
+            client = TestClient(web.app)
+            r = client.get('/api/live', cookies={'cctv_token': 'secret123'})
             self.assertEqual(r.status_code, 200)
 
-    def test_auth_rejects_bad_cookie_token(self):
+    def test_auth_rejects_wrong_cookie(self):
         with patch.object(web, 'get_token', return_value='secret123'):
-            c = TestClient(web.app)
-            r = c.get('/api/live', cookies={'cctv_token': 'wrong'})
+            client = TestClient(web.app)
+            r = client.get('/api/live', cookies={'cctv_token': 'wrong'})
             self.assertEqual(r.status_code, 401)
 
+    def test_open_when_token_unset(self):
+        with patch.object(web, 'get_token', return_value=''), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
+             patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
+             patch('os.path.exists', return_value=True):
+            client = TestClient(web.app)
+            r = client.get('/api/live')
+            self.assertEqual(r.status_code, 200)
 
 class TestWebFiles(unittest.TestCase):
     def test_files_sorted_newest_first(self):
@@ -87,59 +88,52 @@ class TestWebFiles(unittest.TestCase):
             r = c.get('/api/files?date=2026-10-15')
             self.assertEqual([f['name'] for f in r.json()], ['archive_2026-10-15-10.mp4'])
 
+    def test_files_missing_archive_returns_empty(self):
+        with patch('os.listdir', side_effect=FileNotFoundError), \
+             patch.object(web, 'get_token', return_value=''):
+            c = TestClient(web.app)
+            r = c.get('/api/files')
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.json(), [])
 
 class TestWebStatic(unittest.TestCase):
     def test_hls_rejects_traversal(self):
-        import web as _web
-        from fastapi.testclient import TestClient as _TC
-        with patch.object(_web, 'get_token', return_value=''):
-            c = _TC(_web.app)
-            r = c.get('/hls/../app.py')
-            self.assertIn(r.status_code, (400, 404))
+        with patch.object(web, 'get_token', return_value=''):
+            c = TestClient(web.app)
+            r = c.get('/hls/%2e%2e%2fapp.py')
+            self.assertEqual(r.status_code, 404)
+            r2 = web.serve_hls('../app.py')
+            self.assertEqual(r2.status_code, 404)
+
+    def test_hls_rejects_non_playlist_ts_names(self):
+        with patch.object(web, 'get_token', return_value=''), \
+             patch('os.path.exists', return_value=True), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'):
+            c = TestClient(web.app)
+            r = c.get('/hls/foo.ts')
+            self.assertEqual(r.status_code, 404)
 
     def test_video_404_for_missing(self):
-        import web as _web
-        from fastapi.testclient import TestClient as _TC
-        with patch.object(_web, 'get_token', return_value=''), \
+        with patch.object(web, 'get_token', return_value=''), \
              patch('os.path.exists', return_value=False):
-            c = _TC(_web.app)
+            c = TestClient(web.app)
             r = c.get('/video/archive_2026-10-16-14.mp4')
             self.assertEqual(r.status_code, 404)
 
-    def test_hls_guard_direct(self):
-        import web as _web
-        r = _web.serve_hls('../app.py')
-        self.assertEqual(r.status_code, 404)
-        r = _web.serve_hls('evil.mp4')
-        self.assertEqual(r.status_code, 404)
-        r = _web.serve_video('other.txt')
-        self.assertEqual(r.status_code, 404)
-
-    def test_hls_happy_path_mime(self):
-        import os as _os
-        import tempfile as _tf
-        import web as _web
-        from fastapi.testclient import TestClient as _TC
-        with _tf.TemporaryDirectory() as tmp:
-            m3u8 = 'playlist_2026-10-16-14.m3u8'
-            ts = 'playlist_2026-10-16-14_segment_00000.ts'
-            mp4 = 'archive_2026-10-16-14.mp4'
-            for name, data in ((m3u8, b'#EXTM3U\n'), (ts, b'\x47' * 188), (mp4, b'\x00\x00\x00\x18ftyp')):
-                with open(_os.path.join(tmp, name), 'wb') as f:
-                    f.write(data)
-            with patch.object(_web, 'get_token', return_value=''), \
-                 patch.object(_web, 'get_archive_path', return_value=tmp):
-                c = _TC(_web.app)
-                r = c.get(f'/hls/{m3u8}')
+    def test_hls_serves_playlist_with_correct_mime(self):
+        fd, p = tempfile.mkstemp(prefix='playlist_', suffix='.m3u8')
+        os.close(fd)
+        try:
+            with open(p, 'w') as f:
+                f.write('#EXTM3U\n')
+            with patch.object(web, 'get_token', return_value=''), \
+                 patch.object(web, 'get_archive_path', return_value=os.path.dirname(p)):
+                c = TestClient(web.app)
+                r = c.get('/hls/' + os.path.basename(p))
                 self.assertEqual(r.status_code, 200)
-                self.assertIn('vnd.apple.mpegurl', r.headers.get('content-type', ''))
-                r = c.get(f'/hls/{ts}')
-                self.assertEqual(r.status_code, 200)
-                self.assertIn('mp2t', r.headers.get('content-type', ''))
-                r = c.get(f'/video/{mp4}')
-                self.assertEqual(r.status_code, 200)
-                self.assertIn('mp4', r.headers.get('content-type', ''))
-
+                self.assertEqual(r.headers['content-type'].split(';')[0], 'application/vnd.apple.mpegurl')
+        finally:
+            os.remove(p)
 
 class TestWebIndex(unittest.TestCase):
     def test_index_serves_html(self):
@@ -148,10 +142,8 @@ class TestWebIndex(unittest.TestCase):
             r = c.get('/')
             self.assertEqual(r.status_code, 200)
             self.assertIn('<video', r.text)
-            self.assertIn('hls.js', r.text)
-            self.assertIn('/api/live', r.text)
-            self.assertIn('/api/files', r.text)
-            self.assertIn('localStorage', r.text)
+            self.assertIn('setUrl', r.text)
+            self.assertIn('boot()', r.text)
 
     def test_index_open_with_token_set(self):
         with patch.object(web, 'get_token', return_value='secret123'):

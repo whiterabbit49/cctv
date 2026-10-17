@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add FastAPI web UI (live HLS + mp4 list) embedded in the CCTV archiver container.
+**Goal:** Add FastAPI web UI (live HLS + mp4 list) embedded in the CCTV archiver container, with URL deep-linking of the selected video and playback position.
 
-**Architecture:** Same container/pod, recorder loop untouched, FastAPI + uvicorn on :8080 in a daemon thread sharing ARCHIVE_PATH on disk. Single index.html with hls.js, token auth via CCTV_TOKEN.
+**Architecture:** Same container/pod, recorder loop untouched, FastAPI + uvicorn on :8080 in a daemon thread sharing ARCHIVE_PATH on disk. Single index.html with hls.js, token auth via CCTV_TOKEN. Player state (`?file=<name>&t=<seconds>`) syncs via `history.replaceState` (throttled 3s, immediate on seek/pause); page load restores the same spot; no params = live.
 
 **Tech Stack:** Python 3, FastAPI, uvicorn, hls.js CDN, vanilla JS, unittest + FastAPI TestClient (httpx).
 
@@ -13,7 +13,7 @@
 ## File Structure
 
 - Create `web.py` — FastAPI app: auth middleware, GET /, /api/live, /api/files, /hls/{file}, /video/{name}. One responsibility: HTTP serving. Imports `app` for ARCHIVE_PATH + hour helper to avoid duplication.
-- Create `static/index.html` — single-page UI: top video, LIVE row pinned, date filter + flat mp4 list, token prompt in localStorage. No build step.
+- Create `static/index.html` — single-page UI: top video, LIVE row pinned, date filter + flat mp4 list, token prompt in localStorage. URL state (`?file=&t=`) synced via `history.replaceState` and restored on load. No build step.
 - Create `test_web.py` — unittest suite for web.py using TestClient, mirrors existing `test_app.py` style.
 - Modify `app.py:355-399` (`main()`) — start web thread before recorder loop (~10 lines). No logic change to recording.
 - Modify `Dockerfile` — add py3-pip + fastapi uvicorn httpx.
@@ -318,7 +318,7 @@ class TestWebIndex(unittest.TestCase):
 Run: `python3 -m unittest test_web.TestWebIndex -v`
 Expected: FAIL (FileNotFoundError → 500 or exception).
 
-- [ ] **Step 3: Create minimal static/index.html**
+- [ ] **Step 3: Create minimal static/index.html (with URL deep-linking)**
 
 ```html
 <!DOCTYPE html>
@@ -338,13 +338,81 @@ const v=document.getElementById('v'),list=document.getElementById('list'),d=docu
 tok.value=localStorage.getItem('cctv')||'';tok.onchange=()=>localStorage.setItem('cctv',tok.value);
 const T=()=>tok.value?('?token='+encodeURIComponent(tok.value)):'';
 let hls=null,mode='live';
-function playLive(){fetch('/api/live'+T()).then(r=>r.json()).then(j=>{mode='live';document.getElementById('state').textContent='LIVE '+j.hour;if(Hls.isSupported()){if(hls)hls.destroy();hls=new Hls();hls.loadSource(j.playlist_url+T());hls.attachMedia(v);v.play().catch(()=>{});}else{v.src=j.playlist_url+T();v.play().catch(()=>{});}mark();});}
-function playMp4(n){mode=n;if(hls){hls.destroy();hls=null;}v.src='/video/'+n+T();v.play().catch(()=>{});document.getElementById('state').textContent=n;mark();}
+
+// URL state: ?file=archive_YYYY-MM-DD-HH.mp4&t=<seconds>; no params = live.
+// replaceState only: URL always shareable, back button never steps through seconds.
+function setUrl(file,t){
+  const p=new URLSearchParams();
+  if(file){p.set('file',file);if(typeof t==='number'&&t>0)p.set('t',String(Math.floor(t)));}
+  const q=p.toString();
+  history.replaceState(null,'',q?('?'+q):location.pathname);
+}
+let lastUrlWrite=0;
+function writeUrlNow(){if(mode==='live')return;lastUrlWrite=Date.now();setUrl(mode,v.currentTime);}
+v.addEventListener('timeupdate',()=>{if(mode==='live'||v.paused)return;if(Date.now()-lastUrlWrite<3000)return;writeUrlNow();});
+v.addEventListener('seeked',writeUrlNow);
+v.addEventListener('pause',writeUrlNow);
+
+function playLive(){
+  fetch('/api/live'+T()).then(r=>r.json()).then(j=>{
+    mode='live';setUrl(null);
+    document.getElementById('state').textContent='LIVE '+j.hour;
+    if(Hls.isSupported()){if(hls)hls.destroy();hls=new Hls();hls.loadSource(j.playlist_url+T());hls.attachMedia(v);v.play().catch(()=>{});}
+    else{v.src=j.playlist_url+T();v.play().catch(()=>{});}
+    mark();
+  });
+}
+function playMp4(n,t){
+  mode=n;
+  if(hls){hls.destroy();hls=null;}
+  v.src='/video/'+n+T();
+  if(typeof t==='number'&&t>0)v.addEventListener('loadedmetadata',()=>{v.currentTime=t;},{once:true});
+  v.play().catch(()=>{});
+  document.getElementById('state').textContent=n;
+  mark();
+  lastUrlWrite=Date.now();setUrl(n,t);
+}
 function mark(){[...list.children].forEach(b=>b.classList.toggle('active',(b.dataset.n||'live')===mode));}
-function load(){const q=d.value?('?date='+d.value):'';fetch('/api/files'+q+T()).then(r=>{if(r.status===401){document.getElementById('state').textContent='need token';return[];}return r.json();}).then(fs=>{list.innerHTML='';const live=document.createElement('button');live.className='row live';live.textContent='🔴 LIVE — back to live';live.onclick=playLive;live.dataset.n='live';list.appendChild(live);fs.forEach(f=>{const b=document.createElement('button');b.className='row';b.dataset.n=f.name;b.textContent=f.hour+' — '+f.name+' — '+(f.size/1048576).toFixed(1)+' MB';b.onclick=()=>playMp4(f.name);list.appendChild(b);});mark();});}
-d.onchange=load;document.getElementById('clr').onclick=()=>{d.value='';load();};
+function load(){
+  const q=d.value?('?date='+d.value):'';
+  return fetch('/api/files'+q+T()).then(r=>{
+    if(r.status===401){document.getElementById('state').textContent='need token';return[];}
+    return r.json();
+  }).then(fs=>{
+    list.innerHTML='';
+    const live=document.createElement('button');
+    live.className='row live';live.textContent='🔴 LIVE — back to live';
+    live.onclick=playLive;live.dataset.n='live';list.appendChild(live);
+    fs.forEach(f=>{
+      const b=document.createElement('button');
+      b.className='row';b.dataset.n=f.name;
+      b.textContent=f.hour+' — '+f.name+' — '+(f.size/1048576).toFixed(1)+' MB';
+      b.onclick=()=>playMp4(f.name);list.appendChild(b);
+    });
+    mark();
+  });
+}
+// Restore from URL params, else live. Unknown file (deleted by retention) → live fallback.
+function boot(){
+  const params=new URLSearchParams(location.search);
+  const f=params.get('file');
+  const t=Math.max(0,Math.floor(parseFloat(params.get('t'))||0));
+  if(f){
+    const date=f.startsWith('archive_')?f.slice(8,18):'';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(date))d.value=date;
+    load().then(()=>{
+      const found=[...list.children].some(b=>b.dataset.n===f);
+      if(found)playMp4(f,t);else playLive();
+    });
+    return;
+  }
+  playLive();
+}
+d.onchange=load;
+document.getElementById('clr').onclick=()=>{d.value='';load();};
 tok.onchange=()=>{localStorage.setItem('cctv',tok.value);load();};
-load();playLive();setInterval(()=>{load();if(mode==='live')playLive();},60000);
+boot();
+setInterval(()=>{load();if(mode==='live')playLive();},60000);
 </script>
 </main></body></html>
 ```
@@ -354,11 +422,19 @@ load();playLive();setInterval(()=>{load();if(mode==='live')playLive();},60000);
 Run: `python3 -m unittest test_web.py -v`
 Expected: PASS including index test.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Manual deep-link verification**
+
+Run: `CCTV_TOKEN= ARCHIVE_PATH=/tmp/fake-archive python3 -c "import threading,uvicorn,web;threading.Thread(target=lambda:uvicorn.run(web.app,host='127.0.0.1',port=8081),daemon=True).start();import time;time.sleep(30)"` (with at least one `archive_*.mp4` present in `/tmp/fake-archive`), open `http://127.0.0.1:8081` in a browser:
+1. Click an mp4, seek to ~1:00 → address bar shows `?file=archive_...mp4&t=…`, updates ~every 3s, back button leaves the site.
+2. Copy that URL, open it in a fresh tab → same file plays at the same position; the date filter is set and the row is highlighted.
+3. Edit the URL to a nonexistent file (`?file=archive_1999-01-01-00.mp4`) → falls back to LIVE with a clean URL.
+4. Click 🔴 LIVE → URL becomes clean (no params).
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add static/index.html test_web.py
-git commit -m "feat(web): single-page viewer, live-default with mp4 select"
+git commit -m "feat(web): single-page viewer with live/mp4 select and URL deep-linking"
 ```
 
 ### Task 5: Wire into app.py + Dockerfile + k8s + README
@@ -476,6 +552,6 @@ Open `http://localhost:8080`, enter token if set. No file selected = LIVE HLS. C
 
 ## Self-Review
 
-1. **Spec coverage:** live HLS via .ts → Task 1+3+4; flat mp4 list + LIVE entry → Task 2+4; FastAPI embed :8080 → Task 5; token → Task 1+4; hour rollover poll → Task 4 JS interval; grouping N/A (flat chosen); retention/mime/range → Task 3 FileResponse; tests → every task TDD.
+1. **Spec coverage:** live HLS via .ts → Task 1+3+4; flat mp4 list + LIVE entry → Task 2+4; FastAPI embed :8080 → Task 5; token → Task 1+4; hour rollover poll → Task 4 JS interval; grouping N/A (flat chosen); retention/mime/range → Task 3 FileResponse; tests → every task TDD; URL deep-linking (spec "URL deep-linking" section + playback rule 6) → Task 4 `setUrl`/`writeUrlNow`/`boot` (query params + replaceState, 3s throttle, immediate on seek/pause, restore-on-load with date-filter set from filename, unknown file → live fallback, LIVE click clears params) + Task 4 Step 5 manual verification.
 2. **Placeholder scan:** no TBD/TODO; every code step shows full file content; commands exact with expected output; no "similar to Task N".
-3. **Type consistency:** `get_token()->str`, `get_archive_path()->str`, `api_live()->dict|JSONResponse`, `api_files(date:str|None)->list[dict{name,hour,size,mtime}]`, `serve_hls(filename:str)`, `serve_video(name:str)` used identically in tests and impl; frontend `mode='live'|mp4name` matches `mark()`.
+3. **Type consistency:** `get_token()->str`, `get_archive_path()->str`, `api_live()->dict|JSONResponse`, `api_files(date:str|None)->list[dict{name,hour,size,mtime}]`, `serve_hls(filename:str)`, `serve_video(name:str)` used identically in tests and impl; frontend `mode='live'|mp4name` matches `mark()` and `setUrl(file,t)`; `playMp4(n,t)` callers: row click `playMp4(f.name)` (t undefined → position 0) and `boot()` `playMp4(f,t)`.

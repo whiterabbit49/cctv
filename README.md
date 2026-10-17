@@ -32,8 +32,9 @@ The viewer is embedded in the archiver container (FastAPI + uvicorn on `$WEB_POR
 
 - Open `http://localhost:8080` (via port-forward below). Nothing selected = **LIVE** (current hour's `playlist_*.m3u8` + 10s `.ts` segments, 10–30s delay). Click an MP4 row = play that file. Click **🔴 LIVE** = back to live.
 - File list: `archive_*.mp4` newest-first with an optional date picker. Hours shown are UTC (parsed from filenames).
-- Hour rollover: while watching live the player follows into the new hour (polled every 60s); while watching an MP4 it keeps playing uninterrupted.
-- Restart caveat: restarting the pod mid-hour restarts that hour's HLS segment numbering from `00000`, so the consolidated MP4 for that hour only covers footage since the last restart.
+- Hour rollover: while watching live the player follows into the new hour (polled every 60s); while watching an MP4 it keeps playing uninterrupted and a "LIVE moved to HH" badge appears.
+- Deep links: playback state is shareable — the URL tracks the selected file and position (`?file=archive_YYYY-MM-DD-HH.mp4&t=<seconds>`), so a bookmarked link reopens the same spot.
+- Restart behavior: restarting the pod mid-hour resumes that hour's HLS segment numbering past existing segments (`append_list`), so pre-restart footage is preserved.
 
 ### Access
 
