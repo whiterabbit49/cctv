@@ -41,6 +41,21 @@ class TestWebLive(unittest.TestCase):
             r = client.get('/api/live', headers={'X-CCTV-Token': 'secret123'})
             self.assertEqual(r.status_code, 200)
 
+    def test_auth_accepts_valid_cookie(self):
+        with patch.object(web, 'get_token', return_value='secret123'), \
+             patch.object(web, 'get_archive_path', return_value='/tmp'), \
+             patch('app.get_current_hour_identifier', return_value='2026-10-16-14'), \
+             patch('os.path.exists', return_value=True):
+            client = TestClient(web.app)
+            r = client.get('/api/live', cookies={'cctv_token': 'secret123'})
+            self.assertEqual(r.status_code, 200)
+
+    def test_auth_rejects_wrong_cookie(self):
+        with patch.object(web, 'get_token', return_value='secret123'):
+            client = TestClient(web.app)
+            r = client.get('/api/live', cookies={'cctv_token': 'wrong'})
+            self.assertEqual(r.status_code, 401)
+
     def test_open_when_token_unset(self):
         with patch.object(web, 'get_token', return_value=''), \
              patch.object(web, 'get_archive_path', return_value='/tmp'), \
@@ -85,8 +100,10 @@ class TestWebStatic(unittest.TestCase):
     def test_hls_rejects_traversal(self):
         with patch.object(web, 'get_token', return_value=''):
             c = TestClient(web.app)
-            r = c.get('/hls/../app.py')
-            self.assertIn(r.status_code, (400, 404))
+            r = c.get('/hls/%2e%2e%2fapp.py')
+            self.assertEqual(r.status_code, 404)
+            r2 = web.serve_hls('../app.py')
+            self.assertEqual(r2.status_code, 404)
 
     def test_hls_rejects_non_playlist_ts_names(self):
         with patch.object(web, 'get_token', return_value=''), \

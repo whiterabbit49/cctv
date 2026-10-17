@@ -11,10 +11,12 @@
 <div id="bar"><input type="date" id="d"><button id="clr">Clear</button><input id="tok" placeholder="token" style="flex:1"></div>
 <div id="list"></div>
 <script>
-const v=document.getElementById('v'),list=document.getElementById('list'),d=document.getElementById('d'),tok=document.getElementById('tok');
+const v=document.getElementById('v'),list=document.getElementById('list'),d=document.getElementById('d'),tok=document.getElementById('tok'),state=document.getElementById('state');
 tok.value=localStorage.getItem('cctv')||'';
+function setTok(){localStorage.setItem('cctv',tok.value);if(tok.value)document.cookie='cctv_token='+encodeURIComponent(tok.value)+';path=/;samesite=strict';else document.cookie='cctv_token=;path=/;max-age=0';}
+setTok();
 const T=()=>tok.value?('?token='+encodeURIComponent(tok.value)):'';
-let hls=null,mode='live';
+let hls=null,mode='live',liveHour=null;
 
 // URL state: ?file=archive_YYYY-MM-DD-HH.mp4&t=<seconds>; no params = live.
 // replaceState only: URL always shareable, back button never steps through seconds.
@@ -30,11 +32,21 @@ v.addEventListener('timeupdate',()=>{if(mode==='live'||v.paused)return;if(Date.n
 v.addEventListener('seeked',writeUrlNow);
 v.addEventListener('pause',writeUrlNow);
 
-function playLive(){
-  fetch('/api/live'+T()).then(r=>{if(!r.ok){document.getElementById('state').textContent='need token';return null;}return r.json();}).then(j=>{
+function playLive(poll){
+  fetch('/api/live'+T()).then(r=>{
+    if(r.status===401){state.textContent='need token';return null;}
+    if(r.status===404){state.textContent='waiting for live…';setTimeout(()=>{if(mode==='live')playLive();},5000);return null;}
+    return r.json();
+  }).then(j=>{
     if(!j)return;
+    if(poll&&mode!=='live'){
+      if(j.hour!==liveHour)state.textContent='LIVE moved to '+j.hour;
+      return;
+    }
+    if(mode==='live'&&j.hour===liveHour){state.textContent='LIVE '+j.hour;return;}
+    liveHour=j.hour;
     mode='live';setUrl(null);
-    document.getElementById('state').textContent='LIVE '+j.hour;
+    state.textContent='LIVE '+j.hour;
     if(Hls.isSupported()){if(hls)hls.destroy();hls=new Hls();hls.loadSource(j.playlist_url+T());hls.attachMedia(v);v.play().catch(()=>{});}
     else{v.src=j.playlist_url+T();v.play().catch(()=>{});}
     mark();
@@ -60,7 +72,7 @@ function load(){
     list.innerHTML='';
     const live=document.createElement('button');
     live.className='row live';live.textContent='🔴 LIVE — back to live';
-    live.onclick=playLive;live.dataset.n='live';list.appendChild(live);
+    live.onclick=()=>playLive();live.dataset.n='live';list.appendChild(live);
     fs.forEach(f=>{
       const b=document.createElement('button');
       b.className='row';b.dataset.n=f.name;
@@ -88,8 +100,8 @@ function boot(){
 }
 d.onchange=load;
 document.getElementById('clr').onclick=()=>{d.value='';load();};
-tok.onchange=()=>{localStorage.setItem('cctv',tok.value);load();};
+tok.onchange=()=>{setTok();load();if(mode==='live')playLive();};
 boot();
-setInterval(()=>{load();if(mode==='live')playLive();},60000);
+setInterval(()=>{load();playLive(true);},60000);
 </script>
 </main></body></html>

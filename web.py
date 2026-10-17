@@ -1,4 +1,5 @@
 import os
+import secrets
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse, FileResponse
 import app as archiver
@@ -18,8 +19,8 @@ async def token_guard(request: Request, call_next):
     expected = get_token()
     if not expected:
         return await call_next(request)
-    got = request.query_params.get('token') or request.headers.get('x-cctv-token')
-    if got != expected:
+    got = request.query_params.get('token') or request.headers.get('x-cctv-token') or request.cookies.get('cctv_token')
+    if got is None or not secrets.compare_digest(got, expected):
         return JSONResponse({'detail': 'unauthorized'}, status_code=401)
     return await call_next(request)
 
