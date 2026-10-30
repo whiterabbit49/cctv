@@ -39,21 +39,22 @@ main {
     "head head"
     "video list"
     "bar list";
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr;
   column-gap: 16px;
 }
 h2 { grid-area: head; }
 video { grid-area: video; align-self: start; }
-#bar { grid-area: bar; }
+#bar { grid-area: bar; align-self: start; }
 #list { grid-area: list; margin-top: 0; }
 ```
 - Grid areas assign existing flat children to columns without touching DOM order.
-- `video` keeps `width:100%` (fills the `1fr` column, keeps 16:9 via element ratio);
-  `align-self:start` stops it stretching to fill a taller row.
+- `video` keeps `width:100%` (fills the `1fr` column, keeps 16:9 via element ratio).
+  Rows are `auto auto 1fr` (header / video content height / leftover) with
+  `align-self:start` on video and bar, so the controls hug the video instead of
+  drifting to the viewport bottom.
 - Scroll behavior preserved: page still fits `100dvh`; `#list` (already
-  `overflow-y:auto; min-height:0`) becomes the independently scrolling sidebar.
-- `#list` needs `min-height:0` respected in grid context (already present) so the
-  `1fr` video row doesn't force overflow.
+  `overflow-y:auto; min-height:0`) becomes the independently scrolling sidebar
+  spanning the video + bar rows.
 
 ## Error handling
 None — pure presentation. All existing failure paths (401 token, live 404 retry,
