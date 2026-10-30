@@ -73,10 +73,13 @@ function load(){
     const live=document.createElement('button');
     live.className='row live';live.textContent='🔴 LIVE — back to live';
     live.onclick=()=>playLive();live.dataset.n='live';list.appendChild(live);
+    const sum={},cnt={};
+    fs.forEach(f=>{const dd=f.hour.slice(0,10);sum[dd]=(sum[dd]||0)+f.size;cnt[dd]=(cnt[dd]||0)+1;});
+    const fmt=b=>b>=1073741824?(b/1073741824).toFixed(1)+' GB':(b/1048576).toFixed(1)+' MB';
     let day='';
     fs.forEach(f=>{
       const dd=f.hour.slice(0,10);
-      if(dd!==day){day=dd;const h=document.createElement('div');h.className='day';h.dataset.n='day';h.textContent=dd;list.appendChild(h);}
+      if(dd!==day){day=dd;const h=document.createElement('div');h.className='day';h.dataset.n='day';h.textContent=dd+' — '+fmt(sum[dd])+' · '+cnt[dd]+' file'+(cnt[dd]>1?'s':'');list.appendChild(h);}
       const b=document.createElement('button');
       b.className='row';b.dataset.n=f.name;
       b.textContent=f.hour.slice(11)+':00 — '+(f.size/1048576).toFixed(1)+' MB';
